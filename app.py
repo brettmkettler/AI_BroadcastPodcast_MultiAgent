@@ -7,6 +7,8 @@ from datetime import datetime
 from agents.podcast_agent import PodcastAgent
 from agents.voice_synthesizer import VoiceSynthesizer
 from agents.twitter_broadcaster import TwitterBroadcaster
+import base64
+import numpy as np
 
 load_dotenv()
 
@@ -96,12 +98,19 @@ def run_podcast_conversation(topic, room):
             }, room=room)
             
             if audio1:
+                # Convert audio bytes to base64 for transmission
+                audio_data = base64.b64encode(audio1).decode('utf-8')
                 socketio.emit('audio_update', {
-                    'audio': audio1,
+                    'audio': audio_data,
                     'host': 'host1'
                 }, room=room)
+                
+                # For visualization, just use a simple placeholder
+                # Since ElevenLabs audio format is not easily convertible to waveform
+                visualization_data = [0.5] * 100  # Simple placeholder visualization
+                
                 socketio.emit('visualization_update', {
-                    'host1Data': audio1.get_audio_data()
+                    'host1Data': visualization_data
                 }, room=room)
                 
                 # Wait for client to confirm audio finished
@@ -121,12 +130,18 @@ def run_podcast_conversation(topic, room):
             }, room=room)
             
             if audio2:
+                # Convert audio bytes to base64 for transmission
+                audio_data = base64.b64encode(audio2).decode('utf-8')
                 socketio.emit('audio_update', {
-                    'audio': audio2,
+                    'audio': audio_data,
                     'host': 'host2'
                 }, room=room)
+                
+                # For visualization, just use a simple placeholder
+                visualization_data = [0.5] * 100  # Simple placeholder visualization
+                
                 socketio.emit('visualization_update', {
-                    'host2Data': audio2.get_audio_data()
+                    'host2Data': visualization_data
                 }, room=room)
                 
                 # Wait for client to confirm audio finished
