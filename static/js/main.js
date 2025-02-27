@@ -60,8 +60,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     socket.on('audio_update', async (data) => {
         try {
-            // Convert audio data to AudioBuffer
-            const audioBuffer = await audioContext.decodeAudioData(data.audio);
+            // Decode base64 audio data
+            const audioData = atob(data.audio);
+            const audioArray = new Uint8Array(audioData.length);
+            for (let i = 0; i < audioData.length; i++) {
+                audioArray[i] = audioData.charCodeAt(i);
+            }
+            
+            // Convert to AudioBuffer
+            const audioBuffer = await audioContext.decodeAudioData(audioArray.buffer);
             
             // Create and configure source
             const source = audioContext.createBufferSource();
@@ -75,19 +82,26 @@ document.addEventListener('DOMContentLoaded', () => {
             source.start(0);
             
             // When audio finishes
-            source.onended = () => {
+            source.addEventListener('ended', () => {
                 currentAudio = null;
-                // Notify server that audio finished playing
+                console.log('Audio finished, notifying server');
                 socket.emit('audio_finished', { host: data.host });
-            };
+            });
         } catch (error) {
             console.error('Error playing audio:', error);
+            // Even if audio fails, notify server to continue conversation
+            socket.emit('audio_finished', { host: data.host });
         }
     });
 
     socket.on('visualization_update', (data) => {
         // Update visualizations based on audio data
-        updateVisualization(data);
+        if (data.host1Data) {
+            updateWaveform('host1-waveform', data.host1Data);
+        }
+        if (data.host2Data) {
+            updateWaveform('host2-waveform', data.host2Data);
+        }
     });
 
     socket.on('podcast_stopped', (data) => {
@@ -102,7 +116,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     socket.on('error', (data) => {
         console.error('Server error:', data.message);
-        // Display error to user
         const errorDiv = document.createElement('div');
         errorDiv.className = 'alert alert-danger';
         errorDiv.textContent = data.message;
@@ -111,46 +124,32 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-// Function to update the audio visualizations
-function updateVisualization(data) {
-    const { host1Data, host2Data } = data;
-    
-    // Update waveform displays
-    if (host1Data) {
-        updateWaveform('waveform1', host1Data);
-    }
-    if (host2Data) {
-        updateWaveform('waveform2', host2Data);
-    }
-}
-
 function updateWaveform(elementId, audioData) {
     const canvas = document.getElementById(elementId);
+    if (!canvas) return;
+
     const ctx = canvas.getContext('2d');
-    
-    // Clear previous drawing
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    // Draw new waveform
+    const width = canvas.width;
+    const height = canvas.height;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, width, height);
+
+    // Draw waveform
     ctx.beginPath();
     ctx.strokeStyle = '#4CAF50';
     ctx.lineWidth = 2;
-    
-    const sliceWidth = canvas.width / audioData.length;
-    let x = 0;
-    
+
+    const step = width / audioData.length;
     for (let i = 0; i < audioData.length; i++) {
-        const v = audioData[i] / 128.0;
-        const y = (v * canvas.height) / 2;
-        
+        const x = i * step;
+        const y = (height / 2) * (1 - audioData[i]);
         if (i === 0) {
             ctx.moveTo(x, y);
         } else {
             ctx.lineTo(x, y);
         }
-        
-        x += sliceWidth;
     }
-    
+
     ctx.stroke();
 }

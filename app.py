@@ -2,65 +2,42 @@ from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit
 from dotenv import load_dotenv
 import os
-import json
-from datetime import datetime
+import base64
+import numpy as np
+from threading import Event
 from agents.podcast_agent import PodcastAgent
 from agents.voice_synthesizer import VoiceSynthesizer
 from agents.twitter_broadcaster import TwitterBroadcaster
-import base64
-import numpy as np
+import time
 
 load_dotenv()
 
-# Check for required environment variables
-required_env_vars = [
-    'ELEVENLABS_API_KEY',
-    'OPENAI_API_KEY',
-    'VOICE_ID_HOST1',
-    'VOICE_ID_HOST2'
-]
-
-missing_vars = [var for var in required_env_vars if not os.getenv(var)]
-if missing_vars:
-    raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}. Please set them in your .env file.")
-
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
-socketio = SocketIO(app, async_mode='eventlet')
+socketio = SocketIO(app)
 
-# Initialize agents
+# Create agents
 host1 = PodcastAgent(
     name="Brett",
-    personality="A tech-savvy, enthusiastic AI host who loves discussing emerging technologies and their impact on society.",
-    voice_id=os.getenv('VOICE_ID_HOST1')
+    personality="A witty and knowledgeable tech enthusiast who loves making complex topics accessible",
+    voice_id="7eFTSJ6WtWd9VCU4ZlI1"  # Brett
 )
 
 host2 = PodcastAgent(
     name="Kimber",
-    personality="A thoughtful, analytical AI host with a background in philosophy and ethics, offering deep insights into technological implications.",
-    voice_id=os.getenv('VOICE_ID_HOST2')
+    personality="An insightful and thoughtful analyst who brings fresh perspectives to discussions",
+    voice_id="fQ74DTbwd8TiAJFxu9v8"  # Kimber voice
 )
 
 voice_synthesizer = VoiceSynthesizer()
 twitter_broadcaster = TwitterBroadcaster()
 
-# Store active conversations
+# Store active conversations and their audio events
 active_conversations = {}
+audio_events = {}
 
 @app.route('/')
 def index():
     return render_template('index.html')
-
-@socketio.on('connect')
-def handle_connect():
-    print('Client connected')
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    print('Client disconnected')
-    # Clean up any active conversations for this client
-    if request.sid in active_conversations:
-        del active_conversations[request.sid]
 
 @socketio.on('start_podcast')
 def handle_start_podcast(data=None):
@@ -70,6 +47,11 @@ def handle_start_podcast(data=None):
     # Clear both agents' memories when starting a new podcast
     host1.clear_memory()
     host2.clear_memory()
+    
+    # Create an event for this conversation
+    conversation_id = request.sid
+    audio_events[conversation_id] = Event()
+    audio_events[conversation_id].set()  # Initially set to allow first message
     
     socketio.emit('topic_update', {'topic': topic}, room=request.sid)
     
@@ -106,15 +88,17 @@ def run_podcast_conversation(topic, room):
                 }, room=room)
                 
                 # For visualization, just use a simple placeholder
-                # Since ElevenLabs audio format is not easily convertible to waveform
                 visualization_data = [0.5] * 100  # Simple placeholder visualization
                 
                 socketio.emit('visualization_update', {
                     'host1Data': visualization_data
                 }, room=room)
                 
-                # Wait for client to confirm audio finished
-                socketio.sleep(0.1)  # Small delay to ensure smooth playback
+                # Wait for audio to finish playing (with timeout)
+                start_time = time.time()
+                while not audio_events[room].is_set() and time.time() - start_time < 30:
+                    socketio.sleep(0.1)
+                audio_events[room].clear()  # Reset for next audio
             
             # Update context with host1's response
             current_context = response1
@@ -144,8 +128,11 @@ def run_podcast_conversation(topic, room):
                     'host2Data': visualization_data
                 }, room=room)
                 
-                # Wait for client to confirm audio finished
-                socketio.sleep(0.1)  # Small delay to ensure smooth playback
+                # Wait for audio to finish playing (with timeout)
+                start_time = time.time()
+                while not audio_events[room].is_set() and time.time() - start_time < 30:
+                    socketio.sleep(0.1)
+                audio_events[room].clear()  # Reset for next audio
             
             # Update context with host2's response
             current_context = response2
@@ -158,11 +145,21 @@ def run_podcast_conversation(topic, room):
             socketio.emit('error', {'message': 'An error occurred in the conversation'}, room=room)
             break
 
+@socketio.on('audio_finished')
+def handle_audio_finished(data):
+    """Handle when audio finishes playing on the client."""
+    if request.sid in audio_events:
+        audio_events[request.sid].set()  # Signal that audio is finished
+
 @socketio.on('stop_podcast')
 def handle_stop_podcast():
-    if request.sid in active_conversations:
-        del active_conversations[request.sid]
-    socketio.emit('podcast_stopped', {'message': 'Podcast stopped'}, room=request.sid)
+    conversation_id = request.sid
+    if conversation_id in active_conversations:
+        del active_conversations[conversation_id]
+    if conversation_id in audio_events:
+        audio_events[conversation_id].set()  # Release any waiting threads
+        del audio_events[conversation_id]
+    socketio.emit('podcast_stopped', {'message': 'Podcast stopped'}, room=conversation_id)
 
 @socketio.on('change_topic')
 def handle_topic_change(data):
