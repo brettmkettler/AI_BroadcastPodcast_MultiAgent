@@ -84,7 +84,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // When audio finishes
             source.addEventListener('ended', () => {
                 currentAudio = null;
-                console.log('Audio finished, notifying server');
+                console.log(`Audio finished for ${data.host}, duration was ${data.duration}s`);
                 socket.emit('audio_finished', { host: data.host });
             });
         } catch (error) {
