@@ -25,7 +25,7 @@ class VoiceSynthesizer:
             audio = generate(
                 text=text,
                 voice=voice_id,
-                model="eleven_monolingual_v1"
+                model="eleven_multilingual_v2"
             )
             
             # Estimate duration based on text length and average speaking rate
